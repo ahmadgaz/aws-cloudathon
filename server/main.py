@@ -1,5 +1,6 @@
 import os
 from fastapi import FastAPI, Depends
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.responses import JSONResponse
@@ -14,6 +15,15 @@ engine = create_async_engine(DATABASE_URL, pool_size=10, max_overflow=20, pool_t
 async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 app = FastAPI()
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 async def get_db():
     async with async_session() as session:
