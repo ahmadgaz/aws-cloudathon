@@ -1,0 +1,71 @@
+name: Server Build and Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'server/**'
+      - '.github/workflows/server-build-deploy.yml'
+
+jobs:
+  build-and-deploy:
+    name: Build and Deploy Server
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR
+        id: login-ecr-east
+        uses: aws-actions/amazon-ecr-login@v1
+        with:
+          registries: "037297136404"
+      
+      - name: Configure AWS credentials for us-west-2
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-west-2
+      
+      - name: Login to Amazon ECR for us-west-2
+        id: login-ecr-west
+        uses: aws-actions/amazon-ecr-login@v1
+        with:
+          registries: "037297136404"
+
+      - name: Build, tag, and push Docker image to us-east-1 ECR
+        uses: docker/build-push-action@v4
+        with:
+          context: ./server
+          file: ./server/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.login-ecr-east.outputs.registry }}/us-east-1-app-repo:latest
+            ${{ steps.login-ecr-east.outputs.registry }}/us-east-1-app-repo:${{ github.sha }}
+      
+      - name: Build, tag, and push Docker image to us-west-2 ECR
+        uses: docker/build-push-action@v4
+        with:
+          context: ./server
+          file: ./server/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.login-ecr-west.outputs.registry }}/us-west-2-app-repo:latest
+            ${{ steps.login-ecr-west.outputs.registry }}/us-west-2-app-repo:${{ github.sha }}
+      
+      - name: Force ECS service update us-east-1
+        run: |
+          aws ecs update-service --cluster us-east-1-ecs-cluster --service us-east-1-app-service --force-new-deployment
+      
+      - name: Force ECS service update us-west-2
+        run: |
+          aws ecs update-service --cluster us-west-2-ecs-cluster --service us-west-2-app-service --force-new-deployment 
