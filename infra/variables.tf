@@ -1,0 +1,1 @@
+// Define shared variables here as needed 
