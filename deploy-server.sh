@@ -8,13 +8,67 @@ NC='\033[0m' # No Color
 
 echo -e "${YELLOW}Starting server deployment script${NC}"
 
+# Parse --local flag
+LOCAL_MODE=false
+for arg in "$@"; do
+  if [[ "$arg" == "--local" ]]; then
+    LOCAL_MODE=true
+  fi
+  # No need to shift or reset positional parameters
+  # shift
+  # set -- "$@"
+done
+
+# Start local Postgres for LocalStack dev if not already running
+if $LOCAL_MODE; then
+  POSTGRES_CONTAINER_NAME="cloudathon25-postgres"
+  # Extract credentials from Terraform state (us-east-1 secret)
+  DB_SECRET=$(jq -r '.resources[] | select(.type=="aws_secretsmanager_secret_version" and .name=="db_secret_version_us_east_1") | .instances[0].attributes.secret_string' infra/terraform.tfstate)
+  POSTGRES_USER=$(echo $DB_SECRET | jq -r '.username')
+  POSTGRES_PASSWORD=$(echo $DB_SECRET | jq -r '.password')
+  POSTGRES_DB="$POSTGRES_USER"
+  # Remove existing container and volume for a fresh init
+  if docker ps -a --format '{{.Names}}' | grep -q "^$POSTGRES_CONTAINER_NAME$"; then
+    echo -e "${YELLOW}Removing existing Postgres container to reset credentials and schema...${NC}"
+    docker rm -f $POSTGRES_CONTAINER_NAME
+    docker volume rm ${POSTGRES_CONTAINER_NAME}-data 2>/dev/null || true
+  fi
+  # Check if the container is already running
+  if ! docker ps --format '{{.Names}}' | grep -q "^$POSTGRES_CONTAINER_NAME$"; then
+    echo -e "${YELLOW}Starting local Postgres container for development...${NC}"
+    SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+    docker run -d \
+      --name $POSTGRES_CONTAINER_NAME \
+      -e POSTGRES_PASSWORD=$POSTGRES_PASSWORD \
+      -e POSTGRES_USER=$POSTGRES_USER \
+      -e POSTGRES_DB=$POSTGRES_DB \
+      -p 5432:5432 \
+      -v ${POSTGRES_CONTAINER_NAME}-data:/var/lib/postgresql/data \
+      -v "$SCRIPT_DIR/server/sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro" \
+      postgres:15
+    # Wait for Postgres to be ready
+    echo -e "${YELLOW}Waiting for Postgres to be ready...${NC}"
+    until docker exec $POSTGRES_CONTAINER_NAME pg_isready -U $POSTGRES_USER; do
+      sleep 1
+    done
+    echo -e "${GREEN}Postgres is ready!${NC}"
+  else
+    echo -e "${GREEN}Postgres container already running.${NC}"
+  fi
+fi
+
 # Variables
 REGION_EAST="us-east-1"
-REGION_WEST="us-west-2"
-ACCOUNT_ID="037297136404"
 REPO_NAME_EAST="us-east-1-app-repo"
-REPO_NAME_WEST="us-west-2-app-repo"
 IMAGE_TAG=$(git rev-parse --short HEAD)
+
+# LocalStack settings
+if $LOCAL_MODE; then
+  ECR_EAST="localhost:4510/${REPO_NAME_EAST}"
+else
+  ACCOUNT_ID="037297136404"
+  ECR_EAST="${ACCOUNT_ID}.dkr.ecr.${REGION_EAST}.amazonaws.com/${REPO_NAME_EAST}"
+fi
 
 # Write the image tag to a Terraform variable file for use in ECS task definition
 echo "image_tag = \"$IMAGE_TAG\"" > infra/image_tag.auto.tfvars
@@ -24,57 +78,16 @@ cd "$(dirname "$0")/server" || { echo "Server directory not found"; exit 1; }
 
 # Build Docker image
 echo -e "${YELLOW}Building Docker image...${NC}"
-docker build --platform linux/amd64 -t "${ACCOUNT_ID}.dkr.ecr.${REGION_EAST}.amazonaws.com/${REPO_NAME_EAST}:${IMAGE_TAG}" .
-echo -e "${GREEN}Docker image built successfully${NC}"
+docker build --platform linux/amd64 -t "$ECR_EAST:$IMAGE_TAG" .
+echo -e "${GREEN}Docker image built and tagged as $ECR_EAST:$IMAGE_TAG${NC}"
 
-# Login to ECR in us-east-1
-echo -e "${YELLOW}Logging in to ECR in ${REGION_EAST}...${NC}"
-aws ecr get-login-password --region ${REGION_EAST} | docker login --username AWS --password-stdin "${ACCOUNT_ID}.dkr.ecr.${REGION_EAST}.amazonaws.com"
-echo -e "${GREEN}Successfully logged in to ECR in ${REGION_EAST}${NC}"
+# Tag image for LocalStack ECR URIs (for ECS in both regions)
+docker tag "$ECR_EAST:$IMAGE_TAG" "000000000000.dkr.ecr.us-east-1.localhost.localstack.cloud:4566/us-east-1-app-repo:$IMAGE_TAG"
+docker tag "$ECR_EAST:$IMAGE_TAG" "000000000000.dkr.ecr.us-west-2.localhost.localstack.cloud:4566/us-west-2-app-repo:$IMAGE_TAG"
 
-# Push Docker image to ECR in us-east-1
-echo -e "${YELLOW}Pushing Docker image to ECR in ${REGION_EAST}...${NC}"
-docker push "${ACCOUNT_ID}.dkr.ecr.${REGION_EAST}.amazonaws.com/${REPO_NAME_EAST}:${IMAGE_TAG}"
-echo -e "${GREEN}Successfully pushed image to ECR in ${REGION_EAST}${NC}"
-
-# Tag image for us-west-2
-echo -e "${YELLOW}Tagging image for ${REGION_WEST}...${NC}"
-docker tag "${ACCOUNT_ID}.dkr.ecr.${REGION_EAST}.amazonaws.com/${REPO_NAME_EAST}:${IMAGE_TAG}" "${ACCOUNT_ID}.dkr.ecr.${REGION_WEST}.amazonaws.com/${REPO_NAME_WEST}:${IMAGE_TAG}"
-
-# Login to ECR in us-west-2
-echo -e "${YELLOW}Logging in to ECR in ${REGION_WEST}...${NC}"
-aws ecr get-login-password --region ${REGION_WEST} | docker login --username AWS --password-stdin "${ACCOUNT_ID}.dkr.ecr.${REGION_WEST}.amazonaws.com"
-echo -e "${GREEN}Successfully logged in to ECR in ${REGION_WEST}${NC}"
-
-# Push Docker image to ECR in us-west-2
-echo -e "${YELLOW}Pushing Docker image to ECR in ${REGION_WEST}...${NC}"
-docker push "${ACCOUNT_ID}.dkr.ecr.${REGION_WEST}.amazonaws.com/${REPO_NAME_WEST}:${IMAGE_TAG}"
-echo -e "${GREEN}Successfully pushed image to ECR in ${REGION_WEST}${NC}"
-
-# Update ECS services
-# Note: Service names should match the ECS service names as per Terraform
-
-# us-east-1
-ECS_CLUSTER_EAST="${REGION_EAST}-ecs-cluster"
-ECS_SERVICE_EAST="us-east-1-app-service"
-
-# us-west-2
-ECS_CLUSTER_WEST="${REGION_WEST}-ecs-cluster"
-ECS_SERVICE_WEST="us-west-2-app-service"
-
-echo -e "${YELLOW}Updating ECS service in ${REGION_EAST}...${NC}"
-aws ecs update-service --cluster "$ECS_CLUSTER_EAST" --service "$ECS_SERVICE_EAST" --force-new-deployment --region ${REGION_EAST}
-echo -e "${GREEN}Successfully updated ECS service in ${REGION_EAST}${NC}"
-
-echo -e "${YELLOW}Updating ECS service in ${REGION_WEST}...${NC}"
-aws ecs update-service --cluster "$ECS_CLUSTER_WEST" --service "$ECS_SERVICE_WEST" --force-new-deployment --region ${REGION_WEST}
-echo -e "${GREEN}Successfully updated ECS service in ${REGION_WEST}${NC}"
-
-echo -e "${GREEN}Server deployment completed successfully!${NC}"
-
-# Automatically apply Terraform to update ECS task definition with new image tag
+# Move to infra directory and apply Terraform
+echo -e "${YELLOW}Applying Terraform changes to update ECS task definition and service...${NC}"
 cd ../infra || { echo "Infra directory not found"; exit 1; }
-echo -e "${YELLOW}Applying Terraform changes to update ECS task definition...${NC}"
 terraform apply -auto-approve
 if [ $? -eq 0 ]; then
   echo -e "${GREEN}Terraform apply completed successfully!${NC}"

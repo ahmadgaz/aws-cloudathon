@@ -74,6 +74,9 @@ module "ecs_us_east_1" {
   execution_role_arn    = "arn:aws:iam::037297136404:role/AdminRole"
   task_role_arn         = "arn:aws:iam::037297136404:role/AdminRole"
   image_tag             = var.image_tag
+  # For local development (LocalStack): use a static hostname in DATABASE_URL
+  # For production (AWS), swap the DATABASE_URL line below to use the RDS proxy endpoint
+  # LOCAL DEV:
   container_definitions = <<DEFINITION
 [
   {
@@ -86,7 +89,7 @@ module "ecs_us_east_1" {
       { "containerPort": 3000 }
     ],
     "environment": [
-      { "name": "DATABASE_URL", "value": "postgresql+asyncpg://dbadmin:${random_password.db_password_us_east_1.result}@${module.rds_us_east_1.proxy_endpoint}:5432/postgres" },
+      { "name": "DATABASE_URL", "value": "postgresql+asyncpg://dbadmin:${random_password.db_password_us_east_1.result}@host.docker.internal:5432/dbadmin" },
       { "name": "NODE_ENV", "value": "production" }
     ],
     "logConfiguration": {
@@ -100,6 +103,10 @@ module "ecs_us_east_1" {
   }
 ]
 DEFINITION
+
+  # PRODUCTION (AWS):
+  # Swap the DATABASE_URL line in the above JSON to:
+  # { "name": "DATABASE_URL", "value": "postgresql+asyncpg://dbadmin:${random_password.db_password_us_east_1.result}@${module.rds_us_east_1.proxy_endpoint}:5432/postgres" },
   desired_count         = 1
   subnet_ids            = module.network_us_east_1.public_subnet_ids
   security_group_ids    = [module.network_us_east_1.security_group_id]

@@ -86,7 +86,7 @@ module "ecs_us_west_2" {
       { "containerPort": 3000 }
     ],
     "environment": [
-      { "name": "DATABASE_URL", "value": "postgresql+asyncpg://dbadmin:${random_password.db_password_us_west_2.result}@${module.rds_us_west_2.proxy_endpoint}:5432/postgres" },
+      { "name": "DATABASE_URL", "value": "postgresql+asyncpg://dbadmin:${random_password.db_password_us_west_2.result}@host.docker.internal:5432/postgres" },
       { "name": "NODE_ENV", "value": "production" }
     ],
     "logConfiguration": {
@@ -100,6 +100,10 @@ module "ecs_us_west_2" {
   }
 ]
 DEFINITION
+
+  # PRODUCTION (AWS):
+  # Swap the DATABASE_URL line in the above JSON to:
+  # { "name": "DATABASE_URL", "value": "postgresql+asyncpg://dbadmin:${random_password.db_password_us_west_2.result}@${module.rds_us_west_2.proxy_endpoint}:5432/postgres" },
   desired_count         = 1
   subnet_ids            = module.network_us_west_2.public_subnet_ids
   security_group_ids    = [module.network_us_west_2.security_group_id]

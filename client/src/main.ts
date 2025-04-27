@@ -58,7 +58,11 @@ app.innerHTML = `
 
 async function fetchProducts() {
   try {
-    const response = await fetch('http://localhost:8000/products')
+    // Use VITE_API_BASE_URL for flexibility; fallback to localhost for dev
+    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+    // For production, set VITE_API_BASE_URL to your ALB URL, e.g.:
+    // VITE_API_BASE_URL="http://us-east-1-public-alb.elb.localhost.localstack.cloud:4566"
+    const response = await fetch(`${API_BASE_URL}/products`)
     const data = await response.json()
     displayProducts(data.products)
   } catch (error) {

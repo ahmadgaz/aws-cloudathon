@@ -12,4 +12,9 @@ output "listener" {
 
 output "alb_security_group_id" {
   value = var.alb_security_group_ids[0]
+}
+
+output "alb_dns_name" {
+  value = aws_lb.public.dns_name
+  description = "The DNS name of the ALB."
 } 

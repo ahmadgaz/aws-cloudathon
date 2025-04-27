@@ -8,40 +8,78 @@ NC='\033[0m' # No Color
 
 echo -e "${YELLOW}Starting client deployment script${NC}"
 
+# Parse --local flag
+LOCAL_MODE=false
+for arg in "$@"; do
+  if [[ "$arg" == "--local" ]]; then
+    LOCAL_MODE=true
+  fi
+  # Remove the flag from positional parameters
+  shift
+  set -- "$@"
+done
+
 # Variables
 REGION="us-east-1"
 BUCKET_NAME="demo-bucket-123456-oliver-202406"
 
+# LocalStack settings
+if $LOCAL_MODE; then
+  AWS_CMD="awslocal"
+  export AWS_ACCESS_KEY_ID=test
+  export AWS_SECRET_ACCESS_KEY=test
+  export AWS_DEFAULT_REGION=$REGION
+else
+  AWS_CMD="aws"
+fi
+
+# Get the directory of this script
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Fetch ALB LocalStack URL from Terraform outputs (for API base URL)
+if $LOCAL_MODE; then
+  RAW_URL=$(cd "$SCRIPT_DIR/infra" && terraform output -raw alb_us_east_1_localstack_url)
+  # Remove any accidental repeated domain fragments
+  API_BASE_URL=$(echo "$RAW_URL" | sed 's/\(\.elb\.localhost\.localstack\.cloud\)\+/.elb.localhost.localstack.cloud/')
+else
+  API_BASE_URL="" # Set your production API base URL here if needed
+fi
+
 # Move to client directory
-cd "$(dirname "$0")/client" || { echo "Client directory not found"; exit 1; }
+cd "$SCRIPT_DIR/client" || { echo "Client directory not found"; exit 1; }
 
 # Install dependencies
 echo -e "${YELLOW}Installing dependencies...${NC}"
 npm ci
 echo -e "${GREEN}Dependencies installed successfully${NC}"
 
-# Build client
-echo -e "${YELLOW}Building client...${NC}"
-npm run build
+# Build client with API base URL
+if [ -n "$API_BASE_URL" ]; then
+  echo -e "${YELLOW}Building client with API base URL: $API_BASE_URL${NC}"
+  VITE_API_BASE_URL="$API_BASE_URL" npm run build
+else
+  echo -e "${YELLOW}Building client with default API base URL${NC}"
+  npm run build
+fi
 echo -e "${GREEN}Client built successfully${NC}"
 
 # Deploy to S3
 echo -e "${YELLOW}Deploying to S3...${NC}"
-aws s3 sync dist/ "s3://${BUCKET_NAME}/" --delete --region ${REGION}
+$AWS_CMD s3 sync dist/ "s3://${BUCKET_NAME}/" --delete --region ${REGION}
 echo -e "${GREEN}Successfully deployed to S3${NC}"
 
 # Get CloudFront distribution ID
 echo -e "${YELLOW}Getting CloudFront distribution ID...${NC}"
-DISTRIBUTION_ID=$(aws cloudfront list-distributions --query "DistributionList.Items[?Aliases.Items && contains(Aliases.Items, '${BUCKET_NAME}') || Origins.Items && contains(Origins.Items[].DomainName, '${BUCKET_NAME}')] | [0].Id" --output text --region ${REGION})
+DISTRIBUTION_ID=$($AWS_CMD cloudfront list-distributions --query "DistributionList.Items[?Aliases.Items && contains(Aliases.Items, '${BUCKET_NAME}') || Origins.Items && contains(Origins.Items[].DomainName, '${BUCKET_NAME}')] | [0].Id" --output text --region ${REGION})
 
 if [[ $DISTRIBUTION_ID == "None" || -z $DISTRIBUTION_ID ]]; then
   # Fallback: try to find by origin domain name, but only if Origins.Items exists
-  DISTRIBUTION_ID=$(aws cloudfront list-distributions --query "DistributionList.Items[?Origins.Items && contains(Origins.Items[].DomainName, '${BUCKET_NAME}')] | [0].Id" --output text --region ${REGION})
+  DISTRIBUTION_ID=$($AWS_CMD cloudfront list-distributions --query "DistributionList.Items[?Origins.Items && contains(Origins.Items[].DomainName, '${BUCKET_NAME}')] | [0].Id" --output text --region ${REGION})
 fi
 
 if [[ $DISTRIBUTION_ID == "None" || -z $DISTRIBUTION_ID ]]; then
   echo -e "${YELLOW}Could not automatically find CloudFront distribution ID. Listing all distributions:${NC}"
-  aws cloudfront list-distributions --query "DistributionList.Items[].{Id:Id, Domain:DomainName, Origins:Origins.Items[].DomainName}" --output table --region ${REGION}
+  $AWS_CMD cloudfront list-distributions --query "DistributionList.Items[].{Id:Id, Domain:DomainName, Origins:Origins.Items[].DomainName}" --output table --region ${REGION}
   
   read -p "Enter the CloudFront distribution ID manually: " DISTRIBUTION_ID
   if [[ -z $DISTRIBUTION_ID ]]; then
@@ -52,7 +90,7 @@ fi
 
 # Invalidate CloudFront cache
 echo -e "${YELLOW}Invalidating CloudFront cache with distribution ID: ${DISTRIBUTION_ID}...${NC}"
-aws cloudfront create-invalidation --distribution-id ${DISTRIBUTION_ID} --paths "/*" --region ${REGION}
+$AWS_CMD cloudfront create-invalidation --distribution-id ${DISTRIBUTION_ID} --paths "/*" --region ${REGION}
 echo -e "${GREEN}Successfully invalidated CloudFront cache${NC}"
 
 echo -e "${GREEN}Client deployment completed successfully!${NC}" 
