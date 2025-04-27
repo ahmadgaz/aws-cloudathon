@@ -26,12 +26,14 @@ variable "engine_version" {
 variable "master_username" {
   description = "Master username for the database"
   type        = string
+  default     = null
 }
 
 variable "master_password" {
   description = "Master password for the database"
   type        = string
   sensitive   = true
+  default     = null
 }
 
 variable "instance_count" {
@@ -57,4 +59,10 @@ variable "proxy_role_arn" {
 variable "db_secret_arn" {
   description = "Secret ARN for RDS Proxy authentication"
   type        = string
+}
+
+variable "global_cluster_identifier" {
+  description = "The global cluster identifier for Aurora global clusters (optional)"
+  type        = string
+  default     = null
 } 

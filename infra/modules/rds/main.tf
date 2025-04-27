@@ -12,12 +12,13 @@ resource "aws_rds_cluster" "main" {
   cluster_identifier      = "${var.region}-db-cluster"
   engine                 = var.engine
   engine_version         = var.engine_version
-  master_username        = var.master_username
-  master_password        = var.master_password
+  master_username        = var.master_username != null ? var.master_username : null
+  master_password        = var.master_password != null ? var.master_password : null
   db_subnet_group_name   = aws_db_subnet_group.main.name
   vpc_security_group_ids = var.db_security_group_ids
   skip_final_snapshot    = true
   tags = { Name = "${var.region}-db-cluster" }
+  global_cluster_identifier = var.global_cluster_identifier
 
   depends_on = [aws_db_subnet_group.main]
 

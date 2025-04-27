@@ -68,29 +68,17 @@ echo -e "${YELLOW}Deploying to S3...${NC}"
 $AWS_CMD s3 sync dist/ "s3://${BUCKET_NAME}/" --delete --region ${REGION}
 echo -e "${GREEN}Successfully deployed to S3${NC}"
 
-# Get CloudFront distribution ID
-echo -e "${YELLOW}Getting CloudFront distribution ID...${NC}"
-DISTRIBUTION_ID=$($AWS_CMD cloudfront list-distributions --query "DistributionList.Items[?Aliases.Items && contains(Aliases.Items, '${BUCKET_NAME}') || Origins.Items && contains(Origins.Items[].DomainName, '${BUCKET_NAME}')] | [0].Id" --output text --region ${REGION})
-
-if [[ $DISTRIBUTION_ID == "None" || -z $DISTRIBUTION_ID ]]; then
-  # Fallback: try to find by origin domain name, but only if Origins.Items exists
-  DISTRIBUTION_ID=$($AWS_CMD cloudfront list-distributions --query "DistributionList.Items[?Origins.Items && contains(Origins.Items[].DomainName, '${BUCKET_NAME}')] | [0].Id" --output text --region ${REGION})
-fi
-
-if [[ $DISTRIBUTION_ID == "None" || -z $DISTRIBUTION_ID ]]; then
-  echo -e "${YELLOW}Could not automatically find CloudFront distribution ID. Listing all distributions:${NC}"
-  $AWS_CMD cloudfront list-distributions --query "DistributionList.Items[].{Id:Id, Domain:DomainName, Origins:Origins.Items[].DomainName}" --output table --region ${REGION}
-  
-  read -p "Enter the CloudFront distribution ID manually: " DISTRIBUTION_ID
-  if [[ -z $DISTRIBUTION_ID ]]; then
-    echo -e "${YELLOW}No distribution ID provided. Skipping cache invalidation.${NC}"
-    exit 0
-  fi
+# Get CloudFront distribution ID from Terraform output
+echo -e "${YELLOW}Getting CloudFront distribution ID from Terraform output...${NC}"
+CLOUDFRONT_DIST_ID=$(cd "$SCRIPT_DIR/infra" && terraform output -raw cloudfront_distribution_id)
+if [[ -z $CLOUDFRONT_DIST_ID ]]; then
+  echo -e "${YELLOW}Could not find CloudFront distribution ID from Terraform output. Skipping cache invalidation.${NC}"
+  exit 0
 fi
 
 # Invalidate CloudFront cache
-echo -e "${YELLOW}Invalidating CloudFront cache with distribution ID: ${DISTRIBUTION_ID}...${NC}"
-$AWS_CMD cloudfront create-invalidation --distribution-id ${DISTRIBUTION_ID} --paths "/*" --region ${REGION}
+echo -e "${YELLOW}Invalidating CloudFront cache with distribution ID: ${CLOUDFRONT_DIST_ID}...${NC}"
+$AWS_CMD cloudfront create-invalidation --distribution-id ${CLOUDFRONT_DIST_ID} --paths "/*" --region ${REGION}
 echo -e "${GREEN}Successfully invalidated CloudFront cache${NC}"
 
 echo -e "${GREEN}Client deployment completed successfully!${NC}" 

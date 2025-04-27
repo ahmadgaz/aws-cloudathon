@@ -19,25 +19,6 @@ module "ecr_us_west_2" {
   region    = "us-west-2"
 }
 
-resource "random_password" "db_password_us_west_2" {
-  length  = 16
-  special = false
-}
-
-resource "aws_secretsmanager_secret" "db_secret_us_west_2" {
-  provider = aws.us_west_2
-  name = "us-west-2-db-secret-new-v3"
-}
-
-resource "aws_secretsmanager_secret_version" "db_secret_version_us_west_2" {
-  provider = aws.us_west_2
-  secret_id     = aws_secretsmanager_secret.db_secret_us_west_2.id
-  secret_string = jsonencode({
-    username = "dbadmin"
-    password = random_password.db_password_us_west_2.result
-  })
-}
-
 module "rds_us_west_2" {
   source                = "./modules/rds"
   providers             = { aws = aws.us_west_2 }
@@ -46,14 +27,12 @@ module "rds_us_west_2" {
   db_security_group_ids = [module.network_us_west_2.db_security_group_id]
   engine                = "aurora-postgresql"
   engine_version        = "15.4"
-  master_username       = "dbadmin"
-  master_password       = random_password.db_password_us_west_2.result
   instance_count        = 1
   instance_class        = "db.t3.medium"
   engine_family         = "POSTGRESQL"
-  # Ensure this role is in the same account and trusted for RDS Proxy
   proxy_role_arn        = "arn:aws:iam::037297136404:role/AdminRole"
-  db_secret_arn         = aws_secretsmanager_secret.db_secret_us_west_2.arn
+  db_secret_arn         = module.rds_us_east_1.db_secret_arn
+  global_cluster_identifier = module.rds_us_east_1.global_cluster_identifier
 }
 
 module "alb_us_west_2" {
@@ -86,7 +65,7 @@ module "ecs_us_west_2" {
       { "containerPort": 3000 }
     ],
     "environment": [
-      { "name": "DATABASE_URL", "value": "postgresql+asyncpg://dbadmin:${random_password.db_password_us_west_2.result}@host.docker.internal:5432/postgres" },
+      { "name": "DATABASE_URL", "value": "postgresql+asyncpg://dbadmin:${module.rds_us_east_1.master_password}@host.docker.internal:5432/postgres" },
       { "name": "NODE_ENV", "value": "production" }
     ],
     "logConfiguration": {
@@ -103,7 +82,7 @@ DEFINITION
 
   # PRODUCTION (AWS):
   # Swap the DATABASE_URL line in the above JSON to:
-  # { "name": "DATABASE_URL", "value": "postgresql+asyncpg://dbadmin:${random_password.db_password_us_west_2.result}@${module.rds_us_west_2.proxy_endpoint}:5432/postgres" },
+  # { "name": "DATABASE_URL", "value": "postgresql+asyncpg://dbadmin:${module.rds_us_east_1.master_password}@${module.rds_us_west_2.proxy_endpoint}:5432/postgres" },
   desired_count         = 1
   subnet_ids            = module.network_us_west_2.public_subnet_ids
   security_group_ids    = [module.network_us_west_2.security_group_id]

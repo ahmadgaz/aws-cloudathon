@@ -19,22 +19,29 @@ module "ecr_us_east_1" {
   region    = "us-east-1"
 }
 
-resource "random_password" "db_password_us_east_1" {
+resource "aws_rds_global_cluster" "aurora_global" {
+  provider = aws.us_east_1
+  global_cluster_identifier = "cloudathon25-global-aurora"
+  engine                   = "aurora-postgresql"
+  engine_version           = "15.4"
+}
+
+resource "random_password" "db_password_global" {
   length  = 16
   special = false
 }
 
-resource "aws_secretsmanager_secret" "db_secret_us_east_1" {
+resource "aws_secretsmanager_secret" "db_secret_global" {
   provider = aws.us_east_1
-  name = "us-east-1-db-secret-new-v3"
+  name = "cloudathon25-global-db-secret"
 }
 
-resource "aws_secretsmanager_secret_version" "db_secret_version_us_east_1" {
+resource "aws_secretsmanager_secret_version" "db_secret_version_global" {
   provider = aws.us_east_1
-  secret_id     = aws_secretsmanager_secret.db_secret_us_east_1.id
+  secret_id     = aws_secretsmanager_secret.db_secret_global.id
   secret_string = jsonencode({
     username = "dbadmin"
-    password = random_password.db_password_us_east_1.result
+    password = random_password.db_password_global.result
   })
 }
 
@@ -47,13 +54,13 @@ module "rds_us_east_1" {
   engine                = "aurora-postgresql"
   engine_version        = "15.4"
   master_username       = "dbadmin"
-  master_password       = random_password.db_password_us_east_1.result
+  master_password       = random_password.db_password_global.result
   instance_count        = 1
   instance_class        = "db.t3.medium"
   engine_family         = "POSTGRESQL"
-  # Ensure this role is in the same account and trusted for RDS Proxy
   proxy_role_arn        = "arn:aws:iam::037297136404:role/AdminRole"
-  db_secret_arn         = aws_secretsmanager_secret.db_secret_us_east_1.arn
+  db_secret_arn         = aws_secretsmanager_secret.db_secret_global.arn
+  global_cluster_identifier = aws_rds_global_cluster.aurora_global.id
 }
 
 module "alb_us_east_1" {
@@ -89,7 +96,7 @@ module "ecs_us_east_1" {
       { "containerPort": 3000 }
     ],
     "environment": [
-      { "name": "DATABASE_URL", "value": "postgresql+asyncpg://dbadmin:${random_password.db_password_us_east_1.result}@host.docker.internal:5432/dbadmin" },
+      { "name": "DATABASE_URL", "value": "postgresql+asyncpg://dbadmin:${module.rds_us_east_1.master_password}@host.docker.internal:5432/dbadmin" },
       { "name": "NODE_ENV", "value": "production" }
     ],
     "logConfiguration": {
@@ -106,7 +113,7 @@ DEFINITION
 
   # PRODUCTION (AWS):
   # Swap the DATABASE_URL line in the above JSON to:
-  # { "name": "DATABASE_URL", "value": "postgresql+asyncpg://dbadmin:${random_password.db_password_us_east_1.result}@${module.rds_us_east_1.proxy_endpoint}:5432/postgres" },
+  # { "name": "DATABASE_URL", "value": "postgresql+asyncpg://dbadmin:${module.rds_us_east_1.master_password}@${module.rds_us_east_1.proxy_endpoint}:5432/postgres" },
   desired_count         = 1
   subnet_ids            = module.network_us_east_1.public_subnet_ids
   security_group_ids    = [module.network_us_east_1.security_group_id]
