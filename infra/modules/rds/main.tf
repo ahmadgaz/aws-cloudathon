@@ -2,6 +2,10 @@ resource "aws_db_subnet_group" "main" {
   name       = "${var.region}-db-subnet-group"
   subnet_ids = var.db_subnet_ids
   tags = { Name = "${var.region}-db-subnet-group" }
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "aws_rds_cluster" "main" {
@@ -14,6 +18,12 @@ resource "aws_rds_cluster" "main" {
   vpc_security_group_ids = var.db_security_group_ids
   skip_final_snapshot    = true
   tags = { Name = "${var.region}-db-cluster" }
+
+  depends_on = [aws_db_subnet_group.main]
+
+  lifecycle {
+    create_before_destroy = false
+  }
 }
 
 resource "aws_rds_cluster_instance" "main" {
@@ -25,6 +35,10 @@ resource "aws_rds_cluster_instance" "main" {
   engine_version     = var.engine_version
   publicly_accessible = false
   tags = { Name = "${var.region}-db-instance-${count.index}" }
+
+  lifecycle {
+    create_before_destroy = false
+  }
 }
 
 resource "aws_db_proxy" "main" {
@@ -38,4 +52,6 @@ resource "aws_db_proxy" "main" {
     secret_arn  = var.db_secret_arn
   }
   tags = { Name = "${var.region}-db-proxy" }
+
+  depends_on = [aws_rds_cluster.main]
 } 

@@ -1,0 +1,39 @@
+{
+  "family": "simple-backend-task",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "arn:aws:iam::037297136404:role/AdminRole",
+  "taskRoleArn": "arn:aws:iam::037297136404:role/AdminRole",
+  "containerDefinitions": [
+    {
+      "name": "backend",
+      "image": "037297136404.dkr.ecr.us-east-1.amazonaws.com/us-east-1-app-repo:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 3000,
+          "hostPort": 3000,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "NODE_ENV",
+          "value": "production"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/simple-backend",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "ecs"
+        }
+      }
+    }
+  ]
+}

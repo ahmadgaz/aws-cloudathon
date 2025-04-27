@@ -29,6 +29,10 @@ async def get_db():
     async with async_session() as session:
         yield session
 
+@app.get("/")
+def root():
+    return {"status": "ok"}
+
 @app.get("/health")
 async def health(db: AsyncSession = Depends(get_db)):
     try:

@@ -61,4 +61,9 @@ variable "container_port" {
 variable "lb_dependency" {
   description = "Dependency for load balancer creation"
   type        = any
+}
+
+variable "image_tag" {
+  description = "Docker image tag for ECS"
+  type        = string
 } 

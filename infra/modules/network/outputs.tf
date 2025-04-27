@@ -60,4 +60,12 @@ output "public_subnet_id" {
 
 output "first_security_group_id" {
   value = aws_security_group.main.id
+}
+
+output "alb_security_group_id" {
+  value = aws_security_group.alb.id
+}
+
+output "db_security_group_id" {
+  value = aws_security_group.db.id
 } 

@@ -14,14 +14,17 @@ REGION_WEST="us-west-2"
 ACCOUNT_ID="037297136404"
 REPO_NAME_EAST="us-east-1-app-repo"
 REPO_NAME_WEST="us-west-2-app-repo"
-IMAGE_TAG="latest"
+IMAGE_TAG=$(git rev-parse --short HEAD)
+
+# Write the image tag to a Terraform variable file for use in ECS task definition
+echo "image_tag = \"$IMAGE_TAG\"" > infra/image_tag.auto.tfvars
 
 # Move to server directory
 cd "$(dirname "$0")/server" || { echo "Server directory not found"; exit 1; }
 
 # Build Docker image
 echo -e "${YELLOW}Building Docker image...${NC}"
-docker build -t "${ACCOUNT_ID}.dkr.ecr.${REGION_EAST}.amazonaws.com/${REPO_NAME_EAST}:${IMAGE_TAG}" .
+docker build --platform linux/amd64 -t "${ACCOUNT_ID}.dkr.ecr.${REGION_EAST}.amazonaws.com/${REPO_NAME_EAST}:${IMAGE_TAG}" .
 echo -e "${GREEN}Docker image built successfully${NC}"
 
 # Login to ECR in us-east-1
@@ -49,12 +52,33 @@ docker push "${ACCOUNT_ID}.dkr.ecr.${REGION_WEST}.amazonaws.com/${REPO_NAME_WEST
 echo -e "${GREEN}Successfully pushed image to ECR in ${REGION_WEST}${NC}"
 
 # Update ECS services
+# Note: Service names should match the ECS service names as per Terraform
+
+# us-east-1
+ECS_CLUSTER_EAST="${REGION_EAST}-ecs-cluster"
+ECS_SERVICE_EAST="us-east-1-app-service"
+
+# us-west-2
+ECS_CLUSTER_WEST="${REGION_WEST}-ecs-cluster"
+ECS_SERVICE_WEST="us-west-2-app-service"
+
 echo -e "${YELLOW}Updating ECS service in ${REGION_EAST}...${NC}"
-aws ecs update-service --cluster "${REGION_EAST}-ecs-cluster" --service "${REGION_EAST}-app-service" --force-new-deployment --region ${REGION_EAST}
+aws ecs update-service --cluster "$ECS_CLUSTER_EAST" --service "$ECS_SERVICE_EAST" --force-new-deployment --region ${REGION_EAST}
 echo -e "${GREEN}Successfully updated ECS service in ${REGION_EAST}${NC}"
 
 echo -e "${YELLOW}Updating ECS service in ${REGION_WEST}...${NC}"
-aws ecs update-service --cluster "${REGION_WEST}-ecs-cluster" --service "${REGION_WEST}-app-service" --force-new-deployment --region ${REGION_WEST}
+aws ecs update-service --cluster "$ECS_CLUSTER_WEST" --service "$ECS_SERVICE_WEST" --force-new-deployment --region ${REGION_WEST}
 echo -e "${GREEN}Successfully updated ECS service in ${REGION_WEST}${NC}"
 
-echo -e "${GREEN}Server deployment completed successfully!${NC}" 
+echo -e "${GREEN}Server deployment completed successfully!${NC}"
+
+# Automatically apply Terraform to update ECS task definition with new image tag
+cd ../infra || { echo "Infra directory not found"; exit 1; }
+echo -e "${YELLOW}Applying Terraform changes to update ECS task definition...${NC}"
+terraform apply -auto-approve
+if [ $? -eq 0 ]; then
+  echo -e "${GREEN}Terraform apply completed successfully!${NC}"
+else
+  echo -e "${YELLOW}Terraform apply failed. Please check the output above for errors.${NC}"
+  exit 1
+fi 

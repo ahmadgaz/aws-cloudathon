@@ -18,4 +18,9 @@ variable "ecs_execution_role_arn_us_west_2" {
 variable "ecs_task_role_arn_us_west_2" {
   description = "ECS task role ARN for us-west-2"
   type        = string
+}
+
+variable "image_tag" {
+  description = "Docker image tag for ECS"
+  type        = string
 } 

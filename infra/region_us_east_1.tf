@@ -1,3 +1,9 @@
+resource "aws_cloudwatch_log_group" "ecs_backend" {
+  provider = aws.us_east_1
+  name              = "/ecs/simple-backend"
+  retention_in_days = 7
+}
+
 module "network_us_east_1" {
   source              = "./modules/network"
   providers           = { aws = aws.us_east_1 }
@@ -20,7 +26,7 @@ resource "random_password" "db_password_us_east_1" {
 
 resource "aws_secretsmanager_secret" "db_secret_us_east_1" {
   provider = aws.us_east_1
-  name = "us-east-1-db-secret-new-v2"
+  name = "us-east-1-db-secret-new-v3"
 }
 
 resource "aws_secretsmanager_secret_version" "db_secret_version_us_east_1" {
@@ -37,7 +43,7 @@ module "rds_us_east_1" {
   providers             = { aws = aws.us_east_1 }
   region                = "us-east-1"
   db_subnet_ids         = module.network_us_east_1.public_subnet_ids
-  db_security_group_ids = [module.network_us_east_1.security_group_id]
+  db_security_group_ids = [module.network_us_east_1.db_security_group_id]
   engine                = "aurora-postgresql"
   engine_version        = "15.4"
   master_username       = "dbadmin"
@@ -55,7 +61,7 @@ module "alb_us_east_1" {
   providers             = { aws = aws.us_east_1 }
   region                = "us-east-1"
   public_subnet_ids     = module.network_us_east_1.public_subnet_ids
-  alb_security_group_ids = [module.network_us_east_1.security_group_id]
+  alb_security_group_ids = [module.network_us_east_1.alb_security_group_id]
   vpc_id                = module.network_us_east_1.vpc_id
 }
 
@@ -67,26 +73,27 @@ module "ecs_us_east_1" {
   memory                = "512"
   execution_role_arn    = "arn:aws:iam::037297136404:role/AdminRole"
   task_role_arn         = "arn:aws:iam::037297136404:role/AdminRole"
+  image_tag             = var.image_tag
   container_definitions = <<DEFINITION
 [
   {
-    "name": "server-container",
-    "image": "${module.ecr_us_east_1.repository_url}:latest",
+    "name": "backend",
+    "image": "${module.ecr_us_east_1.repository_url}:${var.image_tag}",
     "cpu": 256,
     "memory": 512,
     "essential": true,
     "portMappings": [
-      { "containerPort": 3000, "hostPort": 3000 }
+      { "containerPort": 3000 }
     ],
     "environment": [
-      { "name": "DATABASE_URL", "value": "${module.rds_us_east_1.proxy_endpoint}" },
+      { "name": "DATABASE_URL", "value": "postgresql+asyncpg://dbadmin:${random_password.db_password_us_east_1.result}@${module.rds_us_east_1.proxy_endpoint}:5432/postgres" },
       { "name": "NODE_ENV", "value": "production" }
     ],
     "logConfiguration": {
       "logDriver": "awslogs",
       "options": {
         "awslogs-region": "us-east-1",
-        "awslogs-group": "/ecs/server-app",
+        "awslogs-group": "/ecs/simple-backend",
         "awslogs-stream-prefix": "ecs"
       }
     }
@@ -97,7 +104,7 @@ DEFINITION
   subnet_ids            = module.network_us_east_1.public_subnet_ids
   security_group_ids    = [module.network_us_east_1.security_group_id]
   target_group_arn      = module.alb_us_east_1.target_group_arn
-  container_name        = "server-container"
+  container_name        = "backend"
   container_port        = 3000
   lb_dependency         = module.alb_us_east_1.listener
 }
