@@ -78,7 +78,7 @@ fi
 
 # Invalidate CloudFront cache
 echo -e "${YELLOW}Invalidating CloudFront cache with distribution ID: ${CLOUDFRONT_DIST_ID}...${NC}"
-$AWS_CMD cloudfront create-invalidation --distribution-id ${CLOUDFRONT_DIST_ID} --paths "/*" --region ${REGION}
+$AWS_CMD cloudfront create-invalidation --distribution-id ${CLOUDFRONT_DIST_ID} --paths "/*" --region ${REGION} > /dev/null 2>&1
 echo -e "${GREEN}Successfully invalidated CloudFront cache${NC}"
 
 echo -e "${GREEN}Client deployment completed successfully!${NC}" 
